@@ -1,0 +1,233 @@
+---
+title: "Slides"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(randomForest)
+library(gridExtra)
+library(mice)
+library(car)
+library(RColorBrewer)
+```
+
+```{r}
+load("paintings_train.Rdata")
+```
+
+
+## Additional Figure
+
+```{r}
+train=paintings_train %>%
+  mutate(year=as.factor(year)) %>%
+  mutate(expen = cut(paintings_train$logprice, breaks = seq(-0.5,11,1))) %>%
+  mutate(Surface=ifelse(is.na(Surface),0,Surface)) %>%
+  mutate(Interm=ifelse(is.na(Interm),0,Interm)) %>%
+  mutate(logS=log(Surface+1)) %>% mutate(logS_n0=logS>0) %>%
+  mutate(lognf=log(nfigures+1)) %>% mutate(lognf_n0=lognf>0) %>%
+  filter(origin_author!='A',school_pntg!='A',winningbiddertype!='DB') %>%
+  mutate_if(is.character, as.factor)
+treeFctr=c('year','dealer','origin_author','origin_cat','school_pntg','endbuyer','Shape','materialCat','winningbiddertype')
+treeBnry=c('engraved','prevcoll','paired','figures','finished','lrgfont','lands_sc','lands_ment','arch','othgenre','portrait','still_life','discauth','history','pastorale','diff_origin','Interm')
+rf.formula = as.formula(paste0(c('as.factor(expen)~','logS_n0+lognf_n0+lognf+logS+',
+paste0(c(treeFctr,treeBnry),collapse = '+'))))
+```
+
+```{r}
+rf = randomForest(rf.formula,
+                  data=na.omit(train %>%
+                            dplyr::select(logprice,treeBnry,treeFctr,
+                                          logS_n0,lognf_n0,lognf,logS,
+                                          expen)))
+predexpen <- predict(rf, type = "response")
+```
+
+```{r}
+colr <- as.integer(exp(0:10) / exp(10) * 8) + 1
+colSide <- brewer.pal(name = "Blues", n = 9)[colr]
+heatmap(table(train$expen, predexpen), scale = "row", Colv = NA, Rowv = NA,
+        xlab = "Predicted logprice group", ylab = "True logprice group",
+        cexRow = 0.8, cexCol = 0.8,
+        RowSideColors = colSide,
+        main = "Category prediction based on Random Forest")
+```
+
+## CORRECT RESULTS FOR BMA IN WRITEUP PART II. 
+
+```{r setup, include=FALSE}
+library(tufte)
+# invalidate cache when the tufte version changes
+knitr::opts_chunk$set(tidy = FALSE, cache.extra = packageVersion('tufte'),
+                      echo = F,cache=T)
+options(htmltools.dir.version = FALSE)
+library(gridExtra)
+library(tidyverse)
+library(mice)
+library(randomForest)
+library(car)
+library(ggmosaic)
+```
+
+
+```{r read-data, echo=FALSE}
+#Read in the training data: 
+load("paintings_train.Rdata")
+load("paintings_test.Rdata")
+#The Code Book is in the file `paris_paintings.md` provides more information about the data.
+```
+
+```{r}
+#Clean and convert price to numeric.
+paintings_train$price = as.numeric(gsub(",","",paintings_train$price))
+```
+
+```{r, echo = FALSE}
+chr_vars <- names(paintings_train)[map_lgl(paintings_train, ~ typeof(.x) == "character")]
+chr_vars <- chr_vars[-c(2)]  # `lot` should be numeric.
+## Look for levels; determine if can be categorical. 
+uniques <- lapply(paintings_train[chr_vars], unique)
+n.uniques <- sapply(uniques, length)
+## We only want categories with less than 15 levels.
+chr_vars <- chr_vars[n.uniques < 15]
+df_chr <- paintings_train[chr_vars]
+## Handle the "Unknown".
+df_chr$authorstyle[df_chr$authorstyle == "n/a"] = "Unknown"
+df_chr$winningbiddertype[df_chr$winningbiddertype == ""] = "X"
+df_chr$endbuyer[df_chr$endbuyer == ""] = "X"
+df_chr$type_intermed[df_chr$type_intermed == ""] = "Unknown"
+df_chr$Shape[df_chr$Shape == ""] = "Other"
+df_chr$materialCat[df_chr$materialCat == ""] = "other"
+## Convert to factor.
+df_chr <- df_chr %>% map_df(as.factor)
+```
+
+```{r, echo = FALSE}
+shape = df_chr$Shape
+shape[shape == "ovale"] <- "oval"
+shape[shape == "ronde"] <- "round"
+shape <- droplevels(shape)
+df_chr <- mutate(df_chr, Shape = shape)
+style <- df_chr$authorstyle
+style[style %in% c("in the taste", "taste of")] <- "in the taste of"
+style <- droplevels(style)
+df_chr <- mutate(df_chr, authorstyle = style)
+```
+
+```{r, echo = FALSE}
+num_vars <- names(paintings_train)[map_lgl(paintings_train, ~ typeof(.x) != "character")]
+## Find factor variables. 
+uniques <- lapply(paintings_train[num_vars], unique)
+n.uniques <- sapply(uniques, length)
+fct_vars <- num_vars[n.uniques  <= 3]
+df_fct <- paintings_train[fct_vars] %>% map_df(as.factor) %>%
+  select(- count)
+## Numerical variables. 
+ctn_vars <- num_vars[n.uniques > 3]
+df_ctn <- paintings_train[ctn_vars] %>% select(- price)
+#df_ctn$year <- as.factor(df_ctn$year)
+```
+
+```{r, echo = FALSE}
+df <- cbind(df_chr, df_fct, df_ctn)
+```
+
+```{r}
+year1 <- c(1764, 1765, 1766)
+year2 <- c(1767, 1768, 1769)
+year3 <- c(1770, 1771, 1772)
+year4 <- c(1173, 1774, 1775) 
+year5 <- c(1776, 1777)
+year6 <- c(1778, 1779, 1780)
+
+df <- df %>%
+  mutate(YearFactor = ifelse(year %in% year1, 1, ifelse(year %in% year2, 2, ifelse(year %in% year3, 3, ifelse(year %in% year4, 4, ifelse(year %in% year5, 5, 6))))))
+df$YearFactor <- as.factor(df$YearFactor)
+```
+
+```{r, echo = FALSE}
+#Omit selected variables. 
+df_chr2 <- df_chr %>%
+  select(- c("authorstyle", "type_intermed", "winningbiddertype"))
+#options(knitr.kable.NA = '')
+#landscape(kable(summary(df_chr2), caption = "Summary of Character Variables"))
+```
+
+```{r, echo = FALSE}
+#FACTORS; modify Interm to add Unknown level. 
+intermna <- addNA(df_fct$Interm)
+levels(intermna) <- c(levels(df_fct$Interm), "Unknown")
+df_fct$Interm <- intermna
+df_fct2 <- df_fct %>% mutate(Interm = intermna)
+#options(knitr.kable.NA = '')
+#landscape(kable(summary(df_fct2), caption = "Summary of Binary Factor Variables"))
+```
+
+```{r cache=T, echo = FALSE}
+#CONTINUOUS; omit Height_in, Width_in, Surface_Rect, Diam_in, Surface_Rnd, Surface
+#Select Surface
+#Impute Surface
+tempData <- mice(df_ctn[c("logprice", "Surface", "position", "year", "nfigures")], m = 5, maxit = 50, meth='pmm', seed = 521, printFlag = F)
+df_ctn2 <- complete(tempData, 1)
+year1 <- c(1764, 1765, 1766)
+year2 <- c(1767, 1768, 1769)
+year3 <- c(1770, 1771, 1772)
+year4 <- c(1173, 1774, 1775) 
+year5 <- c(1776, 1777)
+year6 <- c(1778, 1779, 1780)
+
+df_ctn2 <- df_ctn2 %>%
+  mutate(YearFactor = ifelse(year %in% year1, 1, ifelse(year %in% year2, 2, ifelse(year %in% year3, 3, ifelse(year %in% year4, 4, ifelse(year %in% year5, 5, 6))))))
+df_ctn2$YearFactor <- as.factor(df_ctn2$YearFactor)
+#tempData$loggedEvents
+#options(knitr.kable.NA = '')
+#landscape(kable(summary(df_ctn2), caption = "Summary of Continuous Numeric Variables"))
+```
+
+```{r, echo = FALSE}
+df2 <- cbind(df_chr2, df_fct2, df_ctn2)
+```
+
+```{r, echo = FALSE,cache = T, echo = FALSE,warning=FALSE, fig.cap="Scatter Plot Matrix for Continuous Numerical Variables",fig.width=6.5,fig.height=3.5}
+## ctn_vars
+#Impute a value close to 1 for apparent outliers in the position variable. 
+df2$position[df2$position > 1] <- 0.99
+df2$position <- as.numeric(df2$position)
+```
+
+```{r}
+df2 <- df2 %>%
+  mutate(Surface = log(Surface + 1))
+#df2$year <- NULL
+
+#summary(df2$Surface)
+```
+
+## Development and Assessment of Model. 
+
+```{r, echo = FALSE}
+library(BAS)
+#Set seed to ensure results are reproducible. 
+set.seed(523)
+#Fit the model using Bayesian linear regression.
+bma_painting <- bas.lm(logprice ~ . -year -figures -origin_cat -school_pntg, data = df2,
+                   prior = "BIC", 
+                   modelprior = uniform(), method = "MCMC")
+```
+
+```{r, echo = FALSE}
+diagnostics(bma_painting, type = "pip", col = "dodgerblue4", pch = 16, cex = 1.5)
+```
+
+The plot above indicates if the posterior inclusion probability has converged under the Markov Chain Monte Carlo method. The posterior inclusion probability is the sum of all posterior probabilities associated with the models which includes a certain explanatory variable (referenced from “What’s the meaning of a posterior inclusion probability (PIP) in Bayesian?”, available at https://www.animalgenome.org/edu/concepts/PPI.php). From the plot, we observe that all of the points fall on the theoretical convergence line, indicating that the number of MCMC iterations is sufficient for the data in Bayesian model averaging and do not need to be increased.
+
+Next, we plot the marginal inclusion probability and model space: 
+
+```{r, echo = FALSE}
+plot(bma_painting, which = 4, ask = FALSE, sub.caption = "", col.in = "darkturquoise", col.ex = "black", lwd = 3)
+image(bma_painting, rotate = TRUE)
+```
+
+For reference, these are the correct plots that should be included in the Part II Write-up. We believe that the plots are incorrect in the write-up because of small inconsistencies within the data cleaning pipeline that occurred when merging work, but due to time constraints (and the deadline date) we are unable to correct this mistake. Thank you in advance for your attention and understanding! 
